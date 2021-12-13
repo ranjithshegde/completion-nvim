@@ -1,11 +1,11 @@
 local vim = vim
 local api = vim.api
-local match = require "completion.matching"
-local source = require "completion.source"
-local signature = require "completion.signature_help"
-local hover = require "completion.hover"
-local opt = require "completion.option"
-local manager = require "completion.manager"
+local match = require 'completion.matching'
+local source = require 'completion.source'
+local signature = require 'completion.signature_help'
+local hover = require 'completion.hover'
+local opt = require 'completion.option'
+local manager = require 'completion.manager'
 local M = {}
 
 ------------------------------------------------------------------------
@@ -53,8 +53,8 @@ function M.smart_tab()
     return
   end
 
-  local col = vim.fn.col "." - 1
-  if col == 0 or vim.fn.getline("."):sub(col, col):match "%s" then
+  local col = vim.fn.col '.' - 1
+  if col == 0 or vim.fn.getline('.'):sub(col, col):match '%s' then
     api.nvim_eval [[feedkeys("\<tab>", "n")]]
     return
   end
@@ -80,8 +80,8 @@ local function autoAddParens(completed_item)
   if completed_item.kind == nil then
     return
   end
-  if string.match(completed_item.kind, ".*Function.*") ~= nil or string.match(completed_item.kind, ".*Method.*") then
-    api.nvim_input "()<left>"
+  if string.match(completed_item.kind, '.*Function.*') ~= nil or string.match(completed_item.kind, '.*Method.*') then
+    api.nvim_input '()<left>'
   end
 end
 
@@ -93,11 +93,22 @@ function M.confirmCompletion(completed_item)
   manager.confirmedCompletion = true
 end
 
-local luasnip = setmetatable({}, {
+local lua_snip = setmetatable({}, {
   __index = function(_, key)
-    return require("luasnip")[key]
+    return require('luasnip')[key]
   end,
 })
+
+local function apply_luasnip(item, suffix)
+  -- TODO: move cursor back to end of new text?
+  if item.textEdit then
+    require('luasnip').lsp_expand(item.textEdit.newText .. suffix)
+  elseif item.insertText then
+    require('luasnip').lsp_expand(item.insertText .. suffix)
+  elseif item.label then
+    require('luasnip').lsp_expand(item.label .. suffix)
+  end
+end
 
 -- apply additionalTextEdits in LSP specs
 local function applyAddtionalTextEdits(completed_item)
@@ -105,8 +116,8 @@ local function applyAddtionalTextEdits(completed_item)
   if completed_item.user_data.lsp ~= nil then
     local item = completed_item.user_data.lsp.completion_item
     -- vim-vsnip have better additional text edits...
-    if vim.fn.exists "g:loaded_vsnip_integ" == 1 then
-      api.nvim_call_function("vsnip_integ#do_complete_done", {
+    if vim.fn.exists 'g:loaded_vsnip_integ' == 1 then
+      api.nvim_call_function('vsnip_integ#do_complete_done', {
         {
           completed_item = completed_item,
           completion_item = item,
@@ -127,34 +138,50 @@ end
 
 -- handle completeDone stuff here
 local function hasConfirmedCompletion()
-  local completed_item = api.nvim_get_vvar "completed_item"
+  local completed_item = api.nvim_get_vvar 'completed_item'
   if completed_item.user_data == nil then
     return
   end
   if completed_item.user_data.lsp ~= nil then
     applyAddtionalTextEdits(completed_item)
-    if opt.get_option "enable_snippet" == "snippets.nvim" then
-      require("snippets").expand_at_cursor(completed_item.user_data.actual_item, completed_item.word)
+    -- TODO: Look into expanding only if thext is luansip
+    -- if opt.get_option "enable_snippet" == "luansip" then
+    local lnum, col = unpack(api.nvim_win_get_cursor(0))
+    lnum = lnum - 1
+    local bufnr = api.nvim_get_current_buf()
+    local suffix = nil
+    -- if expand_snippet then
+    local start_char = col - #completed_item.word
+    local line = api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, true)[1]
+    suffix = line:sub(col + 1)
+    api.nvim_buf_set_text(bufnr, lnum, start_char, lnum, #line, { '' })
+    -- end
+    local item = completed_item.user_data.lsp.completion_item
+    -- if expand_snippet then
+    apply_luasnip(item, suffix)
+    -- end
+    if opt.get_option 'enable_snippet' == 'snippets.nvim' then
+      require('snippets').expand_at_cursor(completed_item.user_data.actual_item, completed_item.word)
     end
   end
-  if opt.get_option "enable_auto_paren" == 1 then
+  if opt.get_option 'enable_auto_paren' == 1 then
     autoAddParens(completed_item)
   end
-  if completed_item.user_data.snippet_source == "UltiSnips" then
-    api.nvim_call_function("UltiSnips#ExpandSnippet", {})
-  elseif completed_item.user_data.snippet_source == "luasnip" then
-    luasnip.expand()
-  elseif completed_item.user_data.snippet_source == "Neosnippet" then
-    api.nvim_input("<c-r>" .. "=neosnippet#expand('" .. completed_item.word .. "')" .. "<CR>")
-  elseif completed_item.user_data.snippet_source == "vim-vsnip" then
-    api.nvim_call_function("vsnip#anonymous", {
-      table.concat(completed_item.user_data.snippet_body, "\n"),
+  if completed_item.user_data.snippet_source == 'UltiSnips' then
+    api.nvim_call_function('UltiSnips#ExpandSnippet', {})
+  elseif completed_item.user_data.snippet_source == 'luasnip' then
+    lua_snip.expand()
+  elseif completed_item.user_data.snippet_source == 'Neosnippet' then
+    api.nvim_input('<c-r>' .. "=neosnippet#expand('" .. completed_item.word .. "')" .. '<CR>')
+  elseif completed_item.user_data.snippet_source == 'vim-vsnip' then
+    api.nvim_call_function('vsnip#anonymous', {
+      table.concat(completed_item.user_data.snippet_body, '\n'),
       {
         prefix = completed_item.word,
       },
     })
-  elseif completed_item.user_data.snippet_source == "snippets.nvim" then
-    require("snippets").expand_at_cursor()
+  elseif completed_item.user_data.snippet_source == 'snippets.nvim' then
+    require('snippets').expand_at_cursor()
   end
 end
 
@@ -184,7 +211,7 @@ function M.on_InsertEnter()
 
   -- TODO: remove this
   local autoChange = false
-  if opt.get_option "auto_change_source" == 1 then
+  if opt.get_option 'auto_change_source' == 1 then
     autoChange = true
   end
 
@@ -192,7 +219,7 @@ function M.on_InsertEnter()
   manager.chainIndex = 1
   source.stop_complete = false
   local l_complete_index = manager.chainIndex
-  local timer_cycle = opt.get_option "timer_cycle"
+  local timer_cycle = opt.get_option 'timer_cycle'
 
   timer:start(
     100,
@@ -202,13 +229,13 @@ function M.on_InsertEnter()
       -- complete if changes are made
       if l_changedTick ~= manager.changedTick then
         manager.changedTick = l_changedTick
-        if opt.get_option "enable_auto_popup" == 1 then
+        if opt.get_option 'enable_auto_popup' == 1 then
           source.autoCompletion()
         end
-        if opt.get_option "enable_auto_hover" == 1 then
+        if opt.get_option 'enable_auto_hover' == 1 then
           hover.autoOpenHoverInPopup(manager)
         end
-        if opt.get_option "enable_auto_signature" == 1 then
+        if opt.get_option 'enable_auto_signature' == 1 then
           signature.autoOpenSignatureHelp()
         end
       end
@@ -227,7 +254,7 @@ function M.on_InsertEnter()
       -- force trigger completion when manaully chaging source
       if l_complete_index ~= manager.chainIndex then
         -- force clear completion
-        if vim.api.nvim_get_mode()["mode"] == "i" or vim.api.nvim_get_mode()["mode"] == "ic" then
+        if vim.api.nvim_get_mode()['mode'] == 'i' or vim.api.nvim_get_mode()['mode'] == 'ic' then
           vim.fn.complete(vim.api.nvim_win_get_cursor(0)[2], {})
         end
         source.triggerCompletion(false, manager)
@@ -260,7 +287,7 @@ end
 M.on_attach = function(option)
   -- setup completion_option tables
   opt.set_option_table(option)
-  local disable_filetypes = opt.get_option "disable_filetypes"
+  local disable_filetypes = opt.get_option 'disable_filetypes'
   local ft = vim.bo.filetype
   for _, disable_ft in ipairs(disable_filetypes) do
     if ft == disable_ft then
@@ -269,18 +296,18 @@ M.on_attach = function(option)
   end
   -- setup autocommand
   -- TODO: Modified this if lua callbacks for autocmd is merged
-  api.nvim_command "augroup CompletionCommand"
-  api.nvim_command "autocmd! * <buffer>"
+  api.nvim_command 'augroup CompletionCommand'
+  api.nvim_command 'autocmd! * <buffer>'
   api.nvim_command "autocmd InsertEnter <buffer> lua require'completion'.on_InsertEnter()"
   api.nvim_command "autocmd InsertLeave <buffer> lua require'completion'.on_InsertLeave()"
   api.nvim_command "autocmd InsertCharPre <buffer> lua require'completion'.on_InsertCharPre()"
   api.nvim_command "autocmd CompleteDone <buffer> lua require'completion'.on_CompleteDone()"
-  api.nvim_command "augroup end"
-  if string.len(opt.get_option "confirm_key") ~= 0 then
+  api.nvim_command 'augroup end'
+  if string.len(opt.get_option 'confirm_key') ~= 0 then
     api.nvim_buf_set_keymap(
       0,
-      "i",
-      opt.get_option "confirm_key",
+      'i',
+      opt.get_option 'confirm_key',
       'pumvisible() ? complete_info()["selected"] != "-1" ? "\\<Plug>(completion_confirm_completion)" :'
         .. ' "\\<c-e>\\<CR>" : "\\<CR>"',
       { silent = false, noremap = false, expr = true }
